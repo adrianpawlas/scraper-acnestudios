@@ -1,0 +1,80 @@
+name: Fashion Scraper
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    # Allow manual triggering
+    inputs:
+      sites:
+        description: 'Sites to scrape (comma-separated, or "all")'
+        required: false
+        default: 'all'
+      sync:
+        description: 'Sync to database'
+        type: boolean
+        required: false
+        default: true
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120  # 2 hours timeout
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Test database connection
+      run: python -m scraper.cli --test-db
+      env:
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+
+    - name: Run scraper
+      run: |
+        # Determine sites to scrape
+        if [ "${{ github.event.inputs.sites }}" != "" ]; then
+          SITES="${{ github.event.inputs.sites }}"
+        else
+          SITES="all"
+        fi
+
+        # Convert comma-separated string to space-separated for CLI
+        SITES_FORMATTED=$(echo $SITES | tr ',' ' ')
+
+        # Run scraper with sync
+        if [ "${{ github.event.inputs.sync }}" = "false" ]; then
+          python -m scraper.cli --sites $SITES_FORMATTED
+        else
+          python -m scraper.cli --sites $SITES_FORMATTED --sync
+        fi
+      env:
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        USER_AGENT: ${{ secrets.USER_AGENT }}
+        EMBEDDINGS_MODEL: ${{ secrets.EMBEDDINGS_MODEL }}
+
+    - name: Log completion
+      if: always()
+      run: |
+        echo "Scraper run completed at $(date)"

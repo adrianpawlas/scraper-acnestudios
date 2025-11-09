@@ -1,0 +1,41 @@
+acne_studios:
+  name: "Acne Studios"
+  mode: "html"  # HTML scraping mode
+  base_url: "https://www.acnestudios.com"
+  categories:
+    - name: "Men's Clothing"
+      url: "https://www.acnestudios.com/eu/cz/en/man/clothing/"
+      gender: "men"
+      selectors:
+        product_container: ".product-tile"
+        product_link: "a[href*='/eu/cz/en/']"
+        product_title: ".product-tile__name"
+        product_price: ".product-tile__price"
+        product_image: "img"
+        product_sizes: ".sizes, .size-selector"
+        load_more_button: ".load-more, .show-more"
+        next_page: ".pagination-next"
+
+  product_selectors:
+    title: "h1, .product-title, [data-testid*='product-title']"
+    price: ".price, .product-price, [data-testid*='price']"
+    currency: ".currency, .price"
+    description: ".description, .product-description, [data-testid*='description']"
+    images: "img[src*='acnestudios.com'], .product-gallery img, .product-images img"
+    sizes: ".sizes, .size-options, [data-testid*='sizes'], .size-selector option, .size-selector button"
+    availability: ".availability, .stock-status, [data-testid*='availability']"
+    sku: "[data-testid*='sku'], .sku, .product-sku"
+    category: ".breadcrumb, .breadcrumbs, [data-testid*='breadcrumb']"
+    color: ".color, .product-color, [data-testid*='color']"
+
+  source: "acne_studios"
+  merchant_name: "Acne Studios"
+  brand: "Acne Studios"
+  currency: "EUR"
+  country: "eu"
+  second_hand: false
+
+  # Scraping settings
+  delay_between_requests: 2  # seconds
+  max_pages: 50  # Maximum pages to scrape
+  timeout: 30  # Request timeout in seconds
