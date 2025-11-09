@@ -41,7 +41,8 @@ def scrape_site(site_name: str, site_config: Dict[str, Any], sync: bool = False)
 
         if sync:
             db = SupabaseDB()
-            if db.upsert_products(products):
+            source = site_config.get('source', site_name)
+            if db.sync_products(source, products):
                 logger.info(f"Successfully synced {len(products)} products to database")
             else:
                 logger.error("Failed to sync products to database")

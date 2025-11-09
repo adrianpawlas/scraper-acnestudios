@@ -60,6 +60,11 @@ python -m scraper.cli --sites acne_studios
 
 # Scrape and sync to database
 python -m scraper.cli --sites acne_studios --sync
+
+**Sync behavior:**
+- ✅ Upserts new/updated products (no duplicates)
+- ✅ Removes products no longer available from the site
+- ✅ Keeps database clean and up-to-date
 ```
 
 ### Scrape All Configured Sites

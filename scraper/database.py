@@ -53,6 +53,44 @@ class SupabaseDB:
             logger.error(f"Failed to upsert products: {e}")
             return False
 
+    def sync_products(self, source: str, products: List[Dict[str, Any]]) -> bool:
+        """
+        Sync products: upsert new/updated products and remove old ones.
+        This ensures the database only contains currently available products.
+        """
+        if not products:
+            logger.warning("No products to sync")
+            return True
+
+        try:
+            # First, upsert all products
+            if not self.upsert_products(products):
+                return False
+
+            # Get all external_ids from the scraped products
+            scraped_external_ids = {product.get('external_id') for product in products if product.get('external_id')}
+
+            # Delete products from this source that weren't in the current scrape
+            # This removes products that are no longer available
+            query = self.client.table('products').delete().eq('source', source)
+
+            # Only delete products NOT in our scraped list
+            if scraped_external_ids:
+                # Use not.in_ to exclude products we just scraped
+                response = query.not_.in_('external_id', list(scraped_external_ids)).execute()
+                deleted_count = len(response.data) if response.data else 0
+                if deleted_count > 0:
+                    logger.info(f"Removed {deleted_count} old/unavailable products from {source}")
+            else:
+                logger.warning("No external_ids found in scraped products, skipping cleanup")
+
+            logger.info(f"Successfully synced {len(products)} products for {source}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to sync products for {source}: {e}")
+            return False
+
     def _format_product_for_db(self, product: Dict[str, Any]) -> Dict[str, Any]:
         """Format product data for database insertion."""
         # Create metadata JSON

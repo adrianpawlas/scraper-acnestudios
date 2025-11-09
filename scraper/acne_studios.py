@@ -25,11 +25,17 @@ class AcneStudiosScraper(BaseScraper):
         category_url = category_config['url']
         gender = category_config.get('gender', 'unisex')
         products = []
-        page = 1
+        all_product_ids = set()  # Track unique products
+        sz = 0  # Start with 0, will become 28, 56, 84, etc.
+        items_per_page = 28  # Acne Studios shows 28 items initially
 
-        while page <= self.max_pages:
-            current_url = f"{category_url}?page={page}" if page > 1 else category_url
-            logger.info(f"Scraping page {page}: {current_url}")
+        while len(products) < 1000:  # Safety limit
+            if sz == 0:
+                current_url = category_url
+            else:
+                current_url = f"{category_url.rstrip('/')}?sz={sz}"
+
+            logger.info(f"Scraping with sz={sz}: {current_url}")
 
             soup = self.get_soup(current_url)
             if not soup:
@@ -37,18 +43,29 @@ class AcneStudiosScraper(BaseScraper):
 
             # Extract products from current page
             page_products = self._extract_products_from_page(soup, gender)
-            if not page_products:
+
+            # Filter out duplicates based on external_id
+            new_products = []
+            for product in page_products:
+                product_id = product.get('external_id')
+                if product_id and product_id not in all_product_ids:
+                    all_product_ids.add(product_id)
+                    new_products.append(product)
+
+            if not new_products:
+                logger.info(f"No new products found at sz={sz}, stopping pagination")
                 break
 
-            products.extend(page_products)
+            products.extend(new_products)
+            logger.info(f"Found {len(new_products)} new products (total: {len(products)})")
 
-            # Check if there's a next page
-            if not self._has_next_page(soup):
+            # Check if we should continue - look for "Load more" button or total count
+            if not self._has_more_products(soup, len(products)):
                 break
 
-            page += 1
+            sz += items_per_page
 
-        logger.info(f"Found {len(products)} products in category {category_config['name']}")
+        logger.info(f"Found {len(products)} total products in category {category_config['name']}")
         return products
 
     def _extract_products_from_page(self, soup: BeautifulSoup, gender: str) -> List[Dict[str, Any]]:
@@ -189,18 +206,38 @@ class AcneStudiosScraper(BaseScraper):
             logger.error(f"Failed to scrape product details from {product_url}: {e}")
             return None
 
-    def _has_next_page(self, soup: BeautifulSoup) -> bool:
-        """Check if there's a next page available."""
+    def _has_more_products(self, soup: BeautifulSoup, current_count: int) -> bool:
+        """Check if there are more products to load."""
         selectors = self.config.get('categories', [{}])[0].get('selectors', {})
 
         # Check for load more button
         load_more = soup.select_one(selectors.get('load_more_button', '.load-more'))
-        if load_more and 'disabled' not in load_more.get('class', []):
+        if load_more and load_more.get_text(strip=True).lower() in ['load more', 'show more']:
             return True
 
-        # Check for pagination next button
-        next_page = soup.select_one(selectors.get('next_page', '.pagination-next'))
-        return next_page is not None
+        # Try to extract total count from page text
+        # Look for patterns like "Showing X of Y" or "Men's Clothing (Y) Y items"
+        page_text = soup.get_text()
+
+        # Check for "Showing X of Y" pattern
+        import re
+        showing_match = re.search(r'Showing\s+(\d+)\s+of\s+(\d+)', page_text, re.IGNORECASE)
+        if showing_match:
+            shown_count = int(showing_match.group(1))
+            total_count = int(showing_match.group(2))
+            logger.info(f"Page shows {shown_count} of {total_count} products")
+            return shown_count < total_count
+
+        # Check for "(X) X items" pattern
+        items_match = re.search(r'\((\d+)\)\s*\d*\s*items?', page_text, re.IGNORECASE)
+        if items_match:
+            total_count = int(items_match.group(1))
+            logger.info(f"Total products available: {total_count}")
+            return current_count < total_count
+
+        # If we can't determine, assume there are more if we got a full page
+        # Acne Studios shows 28 items per page initially
+        return current_count % 28 == 0 and current_count > 0
 
     def _extract_external_id(self, product_url: str) -> str:
         """Extract external ID from product URL."""
