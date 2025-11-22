@@ -39,3 +39,6 @@ acne_studios:
   delay_between_requests: 2  # seconds
   max_pages: 50  # Maximum pages to scrape
   timeout: 30  # Request timeout in seconds
+
+  # Embeddings settings
+  embeddings_model: google/siglip-base-patch16-384  # 768-dim model

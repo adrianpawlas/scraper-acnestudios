@@ -16,7 +16,7 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 class SigLIPEmbeddings:
-    def __init__(self, model_name: str = "google/siglip-large-patch16-384"):
+    def __init__(self, model_name: str = "google/siglip-base-patch16-384"):
         self.model_name = model_name
         self.processor = None
         self.model = None
@@ -66,27 +66,23 @@ class SigLIPEmbeddings:
             return None
 
         try:
-            # Process image for SigLIP (vision-language model)
-            # SigLIP requires both image and text, so we use a dummy text
-            dummy_text = "a photo of a fashion item"
-            inputs = self.processor(
-                text=[dummy_text],
-                images=image,
-                return_tensors="pt",
-                padding=True
-            )
+            # Process image with SigLIP (requires both image and text inputs)
+            inputs = self.processor(images=image, text=[""], return_tensors="pt")
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
             # Generate embedding
             with torch.no_grad():
                 outputs = self.model(**inputs)
-                # For SigLIP, we can use the image embedding from the vision model
-                embedding = outputs.vision_model_output.pooler_output
+                # Use image embeddings (768-dim for SigLIP base)
+                embedding = outputs.image_embeds.squeeze()
 
-            # Convert to numpy and normalize
+            # Convert to numpy
             embedding = embedding.cpu().numpy().flatten()
-            # Normalize the embedding
-            embedding = embedding / np.linalg.norm(embedding)
+
+            # Verify dimensions (should be exactly 768 for base model)
+            if len(embedding) != 768:
+                logger.error(f"Embedding dimension mismatch: got {len(embedding)}, expected 768")
+                return None
 
             return embedding.tolist()
 
@@ -124,25 +120,27 @@ class SigLIPEmbeddings:
             images, valid_urls = zip(*valid_images)
 
             try:
-                # Process batch - SigLIP requires text input
-                dummy_texts = ["a photo of a fashion item"] * len(images)
+                # Process batch with SigLIP
+                empty_texts = [""] * len(images)
                 inputs = self.processor(
-                    text=dummy_texts,
                     images=list(images),
-                    return_tensors="pt",
-                    padding=True
+                    text=empty_texts,
+                    return_tensors="pt"
                 )
                 inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
                 # Generate embeddings
                 with torch.no_grad():
                     outputs = self.model(**inputs)
-                    batch_embeddings = outputs.vision_model_output.pooler_output
+                    batch_embeddings = outputs.image_embeds.squeeze()
 
-                # Convert to numpy and normalize
+                # Convert to numpy
                 batch_embeddings = batch_embeddings.cpu().numpy()
-                norms = np.linalg.norm(batch_embeddings, axis=1, keepdims=True)
-                batch_embeddings = batch_embeddings / norms
+
+                # Verify dimensions
+                if batch_embeddings.shape[-1] != 768:
+                    logger.error(f"Batch embedding dimension mismatch: got {batch_embeddings.shape[-1]}, expected 768")
+                    return [None] * len(batch_urls)
 
                 # Create result list matching original batch size
                 batch_results = []
