@@ -27,7 +27,7 @@ class SupabaseDB:
     def upsert_products(self, products: List[Dict[str, Any]]) -> bool:
         """
         Upsert products into the database.
-        Uses (source, external_id) as unique key.
+        Uses (source, product_url) as unique key.
         """
         if not products:
             logger.warning("No products to upsert")
@@ -40,10 +40,10 @@ class SupabaseDB:
                 formatted_product = self._format_product_for_db(product)
                 formatted_products.append(formatted_product)
 
-            # Perform upsert
+            # Perform upsert using the user's table constraint
             response = self.client.table('products').upsert(
                 formatted_products,
-                on_conflict='source,external_id'
+                on_conflict='source,product_url'
             ).execute()
 
             logger.info(f"Successfully upserted {len(products)} products")
@@ -67,22 +67,24 @@ class SupabaseDB:
             if not self.upsert_products(products):
                 return False
 
-            # Get all external_ids from the scraped products
-            scraped_external_ids = {product.get('external_id') for product in products if product.get('external_id')}
+            # Get all product_urls from the scraped products
 
             # Delete products from this source that weren't in the current scrape
             # This removes products that are no longer available
             query = self.client.table('products').delete().eq('source', source)
 
+            # Get product URLs from scraped products
+            scraped_product_urls = {product.get('product_url') for product in products if product.get('product_url')}
+
             # Only delete products NOT in our scraped list
-            if scraped_external_ids:
+            if scraped_product_urls:
                 # Use not.in_ to exclude products we just scraped
-                response = query.not_.in_('external_id', list(scraped_external_ids)).execute()
+                response = query.not_.in_('product_url', list(scraped_product_urls)).execute()
                 deleted_count = len(response.data) if response.data else 0
                 if deleted_count > 0:
                     logger.info(f"Removed {deleted_count} old/unavailable products from {source}")
             else:
-                logger.warning("No external_ids found in scraped products, skipping cleanup")
+                logger.warning("No product_urls found in scraped products, skipping cleanup")
 
             logger.info(f"Successfully synced {len(products)} products for {source}")
             return True
@@ -92,47 +94,57 @@ class SupabaseDB:
             return False
 
     def _format_product_for_db(self, product: Dict[str, Any]) -> Dict[str, Any]:
-        """Format product data for database insertion."""
-        # Create metadata JSON
-        metadata = {
+        """Format product data for database insertion to match user's table schema."""
+        import json
+        import hashlib
+
+        # Generate unique ID from product_url (since external_id might not be unique)
+        product_url = product.get('product_url', '')
+        if product_url:
+            # Create a hash-based ID from the product URL
+            id_hash = hashlib.md5(product_url.encode('utf-8')).hexdigest()
+            product_id = f"{product.get('source', 'manual')}_{id_hash[:16]}"
+        else:
+            # Fallback if no product_url
+            product_id = product.get('external_id', f"manual_{hash(product.get('title', 'unknown'))}")
+
+        # Create metadata as text (not JSONB)
+        metadata_dict = {
             'source': product.get('source'),
             'country': product.get('country', 'eu'),
             'original_currency': product.get('currency', 'EUR'),
-            'scraped_at': None,  # Will be set by DB trigger
+            'external_id': product.get('external_id'),
+            'merchant_name': product.get('merchant_name'),
+            'scraped_at': None
         }
+        metadata_text = json.dumps(metadata_dict)
 
         # Handle embedding - ensure it's a list of floats or None
         embedding = product.get('embedding')
         if embedding is not None and not isinstance(embedding, list):
             embedding = None
 
+        # Format to match user's table schema exactly
         formatted = {
+            'id': product_id,  # Primary key
             'source': product.get('source', 'manual'),
-            'external_id': product.get('external_id', ''),
-            'merchant_name': product.get('merchant_name'),
             'product_url': product.get('product_url'),
-            'image_url': product.get('image_url'),
+            'image_url': product.get('image_url'),  # Required field
             'brand': product.get('brand'),
-            'title': product.get('title'),
+            'title': product.get('title'),  # Required field
+            'description': product.get('description'),
+            'category': product.get('category'),
             'gender': product.get('gender'),
             'price': product.get('price'),
             'currency': product.get('currency', 'EUR'),
+            'metadata': metadata_text,  # As text, not JSONB
             'size': product.get('size'),
             'second_hand': product.get('second_hand', False),
-            'country': product.get('country', 'eu'),
-            'description': product.get('description'),
-            'category': product.get('category'),
-            'subcategory': product.get('subcategory'),
-            'tags': product.get('tags'),
-            'availability': product.get('availability', 'unknown'),
-            'sku': product.get('sku'),
-            'image_alt_urls': product.get('image_alt_urls'),
-            'metadata': metadata,
             'embedding': embedding
         }
 
-        # Remove None values to avoid DB issues
-        return {k: v for k, v in formatted.items() if v is not None}
+        # Remove None values and empty strings to avoid DB issues
+        return {k: v for k, v in formatted.items() if v is not None and v != ''}
 
     def get_product_count(self, source: Optional[str] = None) -> int:
         """Get count of products, optionally filtered by source."""
