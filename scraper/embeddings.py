@@ -166,17 +166,19 @@ _embeddings_instance = None
 def get_image_embedding(image_url: str) -> Optional[List[float]]:
     """Get embedding for a single image URL."""
     global _embeddings_instance
-    if _embeddings_instance is None:
-        model_name = os.getenv("EMBEDDINGS_MODEL", "google/siglip-base-patch16-384")
-        _embeddings_instance = SigLIPEmbeddings(model_name)
+    # Always check if model name has changed (in case env var was updated)
+    expected_model = os.getenv("EMBEDDINGS_MODEL", "google/siglip-base-patch16-384")
+    if _embeddings_instance is None or _embeddings_instance.model_name != expected_model:
+        _embeddings_instance = SigLIPEmbeddings(expected_model)
     return _embeddings_instance.get_image_embedding(image_url)
 
 def get_batch_embeddings(image_urls: List[str]) -> List[Optional[List[float]]]:
     """Get embeddings for multiple image URLs."""
     global _embeddings_instance
-    if _embeddings_instance is None:
-        model_name = os.getenv("EMBEDDINGS_MODEL", "google/siglip-base-patch16-384")
-        _embeddings_instance = SigLIPEmbeddings(model_name)
+    # Always check if model name has changed (in case env var was updated)
+    expected_model = os.getenv("EMBEDDINGS_MODEL", "google/siglip-base-patch16-384")
+    if _embeddings_instance is None or _embeddings_instance.model_name != expected_model:
+        _embeddings_instance = SigLIPEmbeddings(expected_model)
     return _embeddings_instance.get_batch_embeddings(image_urls)
 
 if __name__ == "__main__":
