@@ -167,7 +167,7 @@ def get_image_embedding(image_url: str) -> Optional[List[float]]:
     """Get embedding for a single image URL."""
     global _embeddings_instance
     if _embeddings_instance is None:
-        model_name = os.getenv("EMBEDDINGS_MODEL", "google/siglip-large-patch16-384")
+        model_name = os.getenv("EMBEDDINGS_MODEL", "google/siglip-base-patch16-384")
         _embeddings_instance = SigLIPEmbeddings(model_name)
     return _embeddings_instance.get_image_embedding(image_url)
 
@@ -175,7 +175,7 @@ def get_batch_embeddings(image_urls: List[str]) -> List[Optional[List[float]]]:
     """Get embeddings for multiple image URLs."""
     global _embeddings_instance
     if _embeddings_instance is None:
-        model_name = os.getenv("EMBEDDINGS_MODEL", "google/siglip-large-patch16-384")
+        model_name = os.getenv("EMBEDDINGS_MODEL", "google/siglip-base-patch16-384")
         _embeddings_instance = SigLIPEmbeddings(model_name)
     return _embeddings_instance.get_batch_embeddings(image_urls)
 
