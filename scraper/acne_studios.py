@@ -24,51 +24,30 @@ class AcneStudiosScraper(BaseScraper):
         """Scrape all products from a category page."""
         category_url = category_config['url']
         gender = category_config.get('gender', 'unisex')
-        products = []
-        all_product_ids = set()  # Track unique products
-        sz = 0  # Start with 0, will become 28, 56, 84, etc.
-        items_per_page = 28  # Acne Studios shows 28 items initially
-        max_pages = 15  # Try up to 15 pages (28 * 15 = 420 products)
 
-        for page in range(max_pages):
-            if sz == 0:
-                current_url = category_url
-            else:
-                current_url = f"{category_url.rstrip('/')}?sz={sz}"
+        # Load all products at once by setting sz to a high number (300+ for 298 products)
+        current_url = f"{category_url.rstrip('/')}?sz=300"
+        logger.info(f"Scraping all products at once: {current_url}")
 
-            logger.info(f"Scraping page {page + 1} with sz={sz}: {current_url}")
+        soup = self.get_soup(current_url)
+        if not soup:
+            logger.error("Failed to load category page")
+            return []
 
-            soup = self.get_soup(current_url)
-            if not soup:
-                break
+        # Extract all products from the page
+        products = self._extract_products_from_page(soup, gender)
 
-            # Extract products from current page
-            page_products = self._extract_products_from_page(soup, gender)
+        # Remove duplicates based on external_id
+        unique_products = []
+        seen_ids = set()
+        for product in products:
+            product_id = product.get('external_id')
+            if product_id and product_id not in seen_ids:
+                seen_ids.add(product_id)
+                unique_products.append(product)
 
-            # Filter out duplicates based on external_id
-            new_products = []
-            for product in page_products:
-                product_id = product.get('external_id')
-                if product_id and product_id not in all_product_ids:
-                    all_product_ids.add(product_id)
-                    new_products.append(product)
-
-            if not new_products:
-                logger.info(f"No new products found at sz={sz}, stopping pagination")
-                break
-
-            products.extend(new_products)
-            logger.info(f"Found {len(new_products)} new products (total: {len(products)})")
-
-            # Check if there are more products to load
-            if not self._has_more_products(soup, len(products)):
-                logger.info("No more products available, stopping pagination")
-                break
-
-            sz += items_per_page
-
-        logger.info(f"Found {len(products)} total products in category {category_config['name']}")
-        return products
+        logger.info(f"Found {len(unique_products)} unique products in category {category_config['name']}")
+        return unique_products
 
     def _extract_products_from_page(self, soup: BeautifulSoup, gender: str) -> List[Dict[str, Any]]:
         """Extract product information from a category page."""
