@@ -20,10 +20,44 @@ class AcneStudiosScraper(BaseScraper):
         self.base_url = site_config['base_url']
         self.max_pages = site_config.get('max_pages', 50)
 
+    def _determine_category_and_gender(self, category_name: str) -> tuple[Optional[str], Optional[str]]:
+        """
+        Determine gender and category based on category name.
+
+        Returns:
+            tuple: (gender, category)
+            - gender: "men", "women", or None
+            - category: "accessory", "footwear", None (for clothing), or "other"
+        """
+        category_lower = category_name.lower()
+
+        # Gender detection
+        if 'men' in category_lower and 'women' not in category_lower:
+            gender = 'men'
+        elif 'women' in category_lower:
+            gender = 'women'
+        else:
+            gender = None  # unisex becomes null
+
+        # Category detection
+        if 'bag' in category_lower or 'scarf' in category_lower or 'scarves' in category_lower:
+            category = 'accessory'
+        elif 'shoe' in category_lower:
+            category = 'footwear'
+        elif 'clothing' in category_lower:
+            category = None  # clothing is default, no category needed
+        else:
+            category = 'other'
+
+        return gender, category
+
     def scrape_category(self, category_config: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Scrape products from a category page."""
         category_url = category_config['url']
-        gender = category_config.get('gender', 'unisex')
+        category_name = category_config['name']
+
+        # Determine gender and category using smart logic
+        gender, category = self._determine_category_and_gender(category_name)
 
         # Use the URL as-is (already includes ?sz parameter for loading all products)
         current_url = category_url
@@ -35,7 +69,7 @@ class AcneStudiosScraper(BaseScraper):
             return []
 
         # Extract all products from the page
-        products = self._extract_products_from_page(soup, gender)
+        products = self._extract_products_from_page(soup, gender, category)
 
         # Remove duplicates based on external_id
         unique_products = []
@@ -50,7 +84,7 @@ class AcneStudiosScraper(BaseScraper):
         logger.info(f"Found {len(unique_products)} products in category {category_config['name']}")
         return unique_products
 
-    def _extract_products_from_page(self, soup: BeautifulSoup, gender: str) -> List[Dict[str, Any]]:
+    def _extract_products_from_page(self, soup: BeautifulSoup, gender: Optional[str], category: Optional[str]) -> List[Dict[str, Any]]:
         """Extract product information from a category page."""
         products = []
         selectors = self.config.get('categories', [{}])[0].get('selectors', {})
@@ -126,6 +160,7 @@ class AcneStudiosScraper(BaseScraper):
                     price=price,
                     currency=self.config.get('currency', 'EUR'),
                     gender=gender,
+                    category=category,
                     source=self.config.get('source', 'acne_studios'),
                     merchant_name=self.config.get('merchant_name', 'Acne Studios'),
                     brand=self.config.get('brand', 'Acne Studios'),
