@@ -21,13 +21,13 @@ class AcneStudiosScraper(BaseScraper):
         self.max_pages = site_config.get('max_pages', 50)
 
     def scrape_category(self, category_config: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Scrape all products from a category page."""
+        """Scrape products from a category page."""
         category_url = category_config['url']
         gender = category_config.get('gender', 'unisex')
 
         # Load all products at once by setting sz to a high number (300+ for 298 products)
         current_url = f"{category_url.rstrip('/')}?sz=300"
-        logger.info(f"Scraping all products at once: {current_url}")
+        logger.info(f"Scraping products: {current_url}")
 
         soup = self.get_soup(current_url)
         if not soup:
@@ -46,7 +46,13 @@ class AcneStudiosScraper(BaseScraper):
                 seen_ids.add(product_id)
                 unique_products.append(product)
 
-        logger.info(f"Found {len(unique_products)} unique products in category {category_config['name']}")
+        # Limit to first 5 products for local testing (not on GitHub Actions)
+        import os
+        if len(unique_products) > 5 and not os.getenv('CI'):
+            unique_products = unique_products[:5]
+            logger.info(f"Limited to 5 products for local testing (total available: {len(products)})")
+
+        logger.info(f"Found {len(unique_products)} products in category {category_config['name']}")
         return unique_products
 
     def _extract_products_from_page(self, soup: BeautifulSoup, gender: str) -> List[Dict[str, Any]]:
