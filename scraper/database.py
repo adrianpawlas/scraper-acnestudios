@@ -119,10 +119,21 @@ class SupabaseDB:
         }
         metadata_text = json.dumps(metadata_dict)
 
-        # Handle embedding - ensure it's a list of floats or None
+        # Handle embedding - ensure it's a list of valid floats or None
         embedding = product.get('embedding')
-        if embedding is not None and not isinstance(embedding, list):
-            embedding = None
+        if embedding is not None:
+            if not isinstance(embedding, list):
+                embedding = None
+            else:
+                # Validate that all values are finite floats
+                try:
+                    embedding = [float(x) for x in embedding]
+                    if any(not isinstance(x, (int, float)) or str(x).lower() in ('nan', 'inf', '-inf') for x in embedding):
+                        logger.warning("Embedding contains invalid values, setting to None")
+                        embedding = None
+                except (ValueError, TypeError):
+                    logger.warning("Embedding contains non-numeric values, setting to None")
+                    embedding = None
 
         # Format to match user's table schema exactly
         formatted = {

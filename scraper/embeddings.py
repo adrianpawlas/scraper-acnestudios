@@ -84,7 +84,15 @@ class SigLIPEmbeddings:
                 logger.error(f"Embedding dimension mismatch: got {len(embedding)}, expected 768")
                 return None
 
-            return embedding.tolist()
+            # Convert to list and validate values
+            embedding_list = embedding.tolist()
+
+            # Check for invalid values that can't be JSON serialized
+            if any(not isinstance(x, (int, float)) or str(x).lower() in ('nan', 'inf', '-inf') for x in embedding_list):
+                logger.error("Embedding contains invalid values (NaN/inf)")
+                return None
+
+            return embedding_list
 
         except Exception as e:
             logger.error(f"Failed to generate embedding for {image_url}: {e}")
@@ -147,7 +155,13 @@ class SigLIPEmbeddings:
                 valid_idx = 0
                 for img in batch_images:
                     if img is not None:
-                        batch_results.append(batch_embeddings[valid_idx].tolist())
+                        embedding_list = batch_embeddings[valid_idx].tolist()
+                        # Validate embedding values
+                        if any(not isinstance(x, (int, float)) or str(x).lower() in ('nan', 'inf', '-inf') for x in embedding_list):
+                            logger.error(f"Batch embedding {valid_idx} contains invalid values")
+                            batch_results.append(None)
+                        else:
+                            batch_results.append(embedding_list)
                         valid_idx += 1
                     else:
                         batch_results.append(None)
