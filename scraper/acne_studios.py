@@ -46,11 +46,6 @@ class AcneStudiosScraper(BaseScraper):
                 seen_ids.add(product_id)
                 unique_products.append(product)
 
-        # Limit to first 5 products for local testing (not on GitHub Actions)
-        import os
-        if len(unique_products) > 5 and not os.getenv('CI'):
-            unique_products = unique_products[:5]
-            logger.info(f"Limited to 5 products for local testing (total available: {len(products)})")
 
         logger.info(f"Found {len(unique_products)} products in category {category_config['name']}")
         return unique_products
