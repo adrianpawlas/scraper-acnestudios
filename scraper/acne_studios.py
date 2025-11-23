@@ -28,14 +28,15 @@ class AcneStudiosScraper(BaseScraper):
         all_product_ids = set()  # Track unique products
         sz = 0  # Start with 0, will become 28, 56, 84, etc.
         items_per_page = 28  # Acne Studios shows 28 items initially
+        max_pages = 15  # Try up to 15 pages (28 * 15 = 420 products)
 
-        while len(products) < 1000:  # Safety limit
+        for page in range(max_pages):
             if sz == 0:
                 current_url = category_url
             else:
                 current_url = f"{category_url.rstrip('/')}?sz={sz}"
 
-            logger.info(f"Scraping with sz={sz}: {current_url}")
+            logger.info(f"Scraping page {page + 1} with sz={sz}: {current_url}")
 
             soup = self.get_soup(current_url)
             if not soup:
@@ -59,8 +60,9 @@ class AcneStudiosScraper(BaseScraper):
             products.extend(new_products)
             logger.info(f"Found {len(new_products)} new products (total: {len(products)})")
 
-            # Check if we should continue - look for "Load more" button or total count
+            # Check if there are more products to load
             if not self._has_more_products(soup, len(products)):
+                logger.info("No more products available, stopping pagination")
                 break
 
             sz += items_per_page
@@ -109,7 +111,26 @@ class AcneStudiosScraper(BaseScraper):
                 price_text = self.extract_text(container, selectors.get('product_price', '.price'))
                 price = self.extract_price(price_text) if price_text else None
 
-                image_url = self.extract_attribute(container, selectors.get('product_image', 'img'), 'src')
+                # Try multiple attributes for lazy-loaded images
+                image_url = None
+                img_element = container.select_one(selectors.get('product_image', 'img'))
+                if img_element:
+                    # Try data-src first (common lazy loading attribute)
+                    image_url = img_element.get('data-src')
+                    if not image_url:
+                        # Try data-lazy-src
+                        image_url = img_element.get('data-lazy-src')
+                    if not image_url:
+                        # Try data-original
+                        image_url = img_element.get('data-original')
+                    if not image_url:
+                        # Fall back to src
+                        image_url = img_element.get('src')
+
+                    # Skip placeholder/base64 images
+                    if image_url and (image_url.startswith('data:') or 'placeholder' in image_url.lower()):
+                        image_url = None
+
                 if image_url:
                     image_url = urljoin(self.base_url, image_url)
 
@@ -213,6 +234,7 @@ class AcneStudiosScraper(BaseScraper):
         # Check for load more button
         load_more = soup.select_one(selectors.get('load_more_button', '.load-more'))
         if load_more and load_more.get_text(strip=True).lower() in ['load more', 'show more']:
+            logger.info("Found 'Load more' button, continuing pagination")
             return True
 
         # Try to extract total count from page text
@@ -228,16 +250,34 @@ class AcneStudiosScraper(BaseScraper):
             logger.info(f"Page shows {shown_count} of {total_count} products")
             return shown_count < total_count
 
-        # Check for "(X) X items" pattern
+        # Check for "(X) X items" pattern - like "Men's Clothing (308) 308 items"
         items_match = re.search(r'\((\d+)\)\s*\d*\s*items?', page_text, re.IGNORECASE)
         if items_match:
             total_count = int(items_match.group(1))
             logger.info(f"Total products available: {total_count}")
             return current_count < total_count
 
-        # If we can't determine, assume there are more if we got a full page
-        # Acne Studios shows 28 items per page initially
-        return current_count % 28 == 0 and current_count > 0
+        # Check for progress bar or loading indicators
+        progress_bar = soup.select_one('.progress-bar--status, [role="progressbar"]')
+        if progress_bar:
+            # If there's a progress bar, there might be more content loading
+            logger.info("Found progress bar, assuming more content available")
+            return True
+
+        # Check if we got fewer products than expected on this page
+        # If we got less than items_per_page, we've reached the end
+        if current_count % 28 != 0:
+            logger.info(f"Got {current_count % 28} products on last page, reached end")
+            return False
+
+        # If we can't determine and we got a full page, assume there might be more
+        # But be conservative - only continue if we haven't exceeded reasonable limits
+        if current_count >= 308:  # Based on user's mention of 308 items
+            logger.info(f"Reached {current_count} products, likely at end")
+            return False
+
+        logger.info(f"Assuming more products available (current: {current_count})")
+        return current_count > 0
 
     def _extract_external_id(self, product_url: str) -> str:
         """Extract external ID from product URL."""
