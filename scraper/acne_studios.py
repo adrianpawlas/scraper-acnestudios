@@ -25,8 +25,8 @@ class AcneStudiosScraper(BaseScraper):
         category_url = category_config['url']
         gender = category_config.get('gender', 'unisex')
 
-        # Load all products at once by setting sz to a high number (300+ for 298 products)
-        current_url = f"{category_url.rstrip('/')}?sz=300"
+        # Use the URL as-is (already includes ?sz parameter for loading all products)
+        current_url = category_url
         logger.info(f"Scraping products: {current_url}")
 
         soup = self.get_soup(current_url)
