@@ -211,19 +211,66 @@ class AcneStudiosScraper(BaseScraper):
             # Extract color
             color = self.extract_text(soup, selectors.get('color', '.color'))
 
-            # Get all product images
-            image_elements = soup.select(selectors.get('images', '.product-gallery img'))
+            # Get all product images using multiple selectors (similar to extraction script)
+            all_images = []
+
+            # Try different selectors to find all images
+            image_selectors = [
+                selectors.get('images', '.product-gallery img'),
+                'img[src*="acnestudios.com"]',
+                '.product-gallery img',
+                '.product-images img',
+                '.gallery img',
+                '.swiper img',
+                '.carousel img',
+                'img[data-src]',
+            ]
+
+            for selector in image_selectors:
+                elements = soup.select(selector)
+                for img in elements:
+                    img_data = self._extract_image_info(img)
+                    if img_data and img_data['url'] not in [i['url'] for i in all_images]:
+                        all_images.append(img_data)
+
+            # Extract URLs and remove duplicates
             image_urls = []
-            for img in image_elements[:5]:  # Limit to first 5 images
-                img_url = img.get('src')
-                if img_url:
-                    img_url = urljoin(self.base_url, img_url)
-                    image_urls.append(img_url)
+            seen_urls = set()
+            for img in all_images:
+                if img['url'] not in seen_urls and not any(skip in img['url'].lower() for skip in ['icon', 'logo', 'arrow', 'svg']):
+                    image_urls.append(img['url'])
+                    seen_urls.add(img['url'])
 
             # Generate embedding for main image if available
+            # Look for the image with '_Y.jpg' suffix (the preferred image)
             embedding = None
+            main_image_url = None
+            alt_urls = []
+
             if image_urls:
-                main_image_url = image_urls[0]
+                # First try to find the image with '_Y.jpg' suffix
+                y_image_url = None
+                for img_url in image_urls:
+                    if '_Y.jpg' in img_url:
+                        y_image_url = img_url
+                        break
+
+                if y_image_url:
+                    # Found the _Y image, use it as main
+                    main_image_url = y_image_url
+                    # Put all other images in alt_urls
+                    alt_urls = [url for url in image_urls if url != y_image_url]
+                    logger.info(f"Found _Y image as main: {main_image_url}")
+                elif len(image_urls) >= 2:
+                    # Fallback: Use second image as main image if no _Y image found
+                    main_image_url = image_urls[1]
+                    alt_urls = [image_urls[0]] + image_urls[2:]
+                    logger.info(f"Using second image as fallback (no _Y image found): {main_image_url}")
+                else:
+                    # Only one image available, use it as main
+                    main_image_url = image_urls[0]
+                    logger.info(f"Only one image available: {main_image_url}")
+
                 logger.info(f"Generating embedding for: {main_image_url}")
                 embedding = get_image_embedding(main_image_url)
 
@@ -234,7 +281,8 @@ class AcneStudiosScraper(BaseScraper):
                 'sku': sku,
                 'category': category,
                 'tags': [color] if color else None,
-                'image_alt_urls': image_urls[1:] if len(image_urls) > 1 else None,
+                'image_url': main_image_url,  # Update main image URL to use second image
+                'image_alt_urls': alt_urls if alt_urls else None,
                 'embedding': embedding
             }
 
@@ -293,6 +341,39 @@ class AcneStudiosScraper(BaseScraper):
 
         logger.info(f"Assuming more products available (current: {current_count})")
         return current_count > 0
+
+    def _extract_image_info(self, img_element) -> Optional[Dict[str, Any]]:
+        """Extract image information from an img element."""
+        # Try different attributes for the image URL
+        img_url = None
+        attributes_tried = []
+
+        # Priority order for image attributes
+        for attr in ['data-src', 'data-lazy-src', 'data-original', 'src']:
+            url = img_element.get(attr)
+            attributes_tried.append(f"{attr}='{url}'")
+            if url and not url.startswith('data:') and not 'placeholder' in url.lower():
+                img_url = url
+                break
+
+        if not img_url:
+            return None
+
+        # Make URL absolute
+        img_url = urljoin(self.base_url, img_url)
+
+        # Extract additional metadata
+        alt_text = img_element.get('alt', '')
+        title_text = img_element.get('title', '')
+        classes = img_element.get('class', [])
+
+        return {
+            'url': img_url,
+            'alt': alt_text,
+            'title': title_text,
+            'classes': classes,
+            'attributes_tried': attributes_tried
+        }
 
     def _extract_external_id(self, product_url: str) -> str:
         """Extract external ID from product URL."""
