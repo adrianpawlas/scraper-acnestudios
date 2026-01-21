@@ -154,8 +154,14 @@ class ProductImageExtractor:
         print(f"TOTAL IMAGES FOUND: {product_data['total_images']}")
         print("="*80)
 
+        preferred_found = False
         for i, img in enumerate(product_data['images'], 1):
-            print(f"\n--- IMAGE {i} ---")
+            is_preferred = 'Y_A.jpg' in img['url']
+            if is_preferred:
+                preferred_found = True
+                print(f"\n--- IMAGE {i} ⭐ PREFERRED ---")
+            else:
+                print(f"\n--- IMAGE {i} ---")
             print(f"URL: {img['url']}")
             if img['alt']:
                 print(f"Alt text: {img['alt']}")
@@ -164,6 +170,14 @@ class ProductImageExtractor:
             if img['classes']:
                 print(f"CSS classes: {', '.join(img['classes'])}")
             print(f"Attributes tried: {img['attributes_tried']}")
+
+        print(f"\n{'='*80}")
+        if preferred_found:
+            print("⭐ Images marked with ⭐ are the preferred ones (containing 'Y_A.jpg').")
+            print("The scraper will use these images and skip products without them.")
+        else:
+            print("❌ No preferred images found (containing 'Y_A.jpg'). This product would be skipped.")
+        print("\nCopy any image URL above and paste it into a browser to view the image.")
 
 def main():
     """Main function to run the image extraction."""
@@ -185,9 +199,6 @@ def main():
 
         if product_data:
             extractor.display_images(product_data)
-            print(f"\n{'='*80}")
-            print("Copy any image URL above and paste it into a browser to view the image.")
-            print("Which image number should be used as the main product image?")
         else:
             print("Failed to extract images from the product page.")
 

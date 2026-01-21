@@ -170,9 +170,12 @@ class AcneStudiosScraper(BaseScraper):
 
                 # Scrape additional details from product page
                 detailed_data = self.scrape_product_details(product_url)
-                if detailed_data:
-                    product_data.update(detailed_data)
+                if detailed_data is None:
+                    # Skip product if no preferred image found
+                    logger.info(f"Skipping product {product_url} - no preferred image found")
+                    continue
 
+                product_data.update(detailed_data)
                 products.append(product_data)
 
             except Exception as e:
@@ -242,34 +245,29 @@ class AcneStudiosScraper(BaseScraper):
                     seen_urls.add(img['url'])
 
             # Generate embedding for main image if available
-            # Look for the image with '_Y.jpg' suffix (the preferred image)
+            # Look for the image with '*Y_A.jpg' pattern (the preferred image)
             embedding = None
             main_image_url = None
             alt_urls = []
 
             if image_urls:
-                # First try to find the image with '_Y.jpg' suffix
-                y_image_url = None
+                # First try to find the image with '*Y_A.jpg' pattern
+                preferred_image_url = None
                 for img_url in image_urls:
-                    if '_Y.jpg' in img_url:
-                        y_image_url = img_url
+                    if 'Y_A.jpg' in img_url:
+                        preferred_image_url = img_url
                         break
 
-                if y_image_url:
-                    # Found the _Y image, use it as main
-                    main_image_url = y_image_url
+                if preferred_image_url:
+                    # Found the preferred Y_A image, use it as main
+                    main_image_url = preferred_image_url
                     # Put all other images in alt_urls
-                    alt_urls = [url for url in image_urls if url != y_image_url]
-                    logger.info(f"Found _Y image as main: {main_image_url}")
-                elif len(image_urls) >= 2:
-                    # Fallback: Use second image as main image if no _Y image found
-                    main_image_url = image_urls[1]
-                    alt_urls = [image_urls[0]] + image_urls[2:]
-                    logger.info(f"Using second image as fallback (no _Y image found): {main_image_url}")
+                    alt_urls = [url for url in image_urls if url != preferred_image_url]
+                    logger.info(f"Found preferred Y_A image as main: {main_image_url}")
                 else:
-                    # Only one image available, use it as main
-                    main_image_url = image_urls[0]
-                    logger.info(f"Only one image available: {main_image_url}")
+                    # No preferred image found, skip this product entirely
+                    logger.warning(f"No preferred Y_A image found for product, skipping. Available images: {len(image_urls)}")
+                    return None
 
                 logger.info(f"Generating embedding for: {main_image_url}")
                 embedding = get_image_embedding(main_image_url)
