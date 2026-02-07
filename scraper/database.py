@@ -119,39 +119,39 @@ class SupabaseDB:
         }
         metadata_text = json.dumps(metadata_dict)
 
-        # Handle embedding - ensure it's a list of valid floats or None
-        embedding = product.get('embedding')
-        if embedding is not None:
-            if not isinstance(embedding, list):
-                embedding = None
-            else:
-                # Validate that all values are finite floats
-                try:
-                    embedding = [float(x) for x in embedding]
-                    if any(not isinstance(x, (int, float)) or str(x).lower() in ('nan', 'inf', '-inf') for x in embedding):
-                        logger.warning("Embedding contains invalid values, setting to None")
-                        embedding = None
-                except (ValueError, TypeError):
-                    logger.warning("Embedding contains non-numeric values, setting to None")
-                    embedding = None
+        def _valid_embedding(emb):
+            if emb is None or not isinstance(emb, list):
+                return None
+            try:
+                emb = [float(x) for x in emb]
+                if any(not isinstance(x, (int, float)) or str(x).lower() in ('nan', 'inf', '-inf') for x in emb):
+                    return None
+                return emb
+            except (ValueError, TypeError):
+                return None
+
+        image_embedding = _valid_embedding(product.get('image_embedding') or product.get('embedding'))
+        info_embedding = _valid_embedding(product.get('info_embedding'))
 
         # Format to match user's table schema exactly
         formatted = {
-            'id': product_id,  # Primary key
+            'id': product_id,
             'source': product.get('source', 'manual'),
             'product_url': product.get('product_url'),
-            'image_url': product.get('image_url'),  # Required field
+            'image_url': product.get('image_url'),
             'brand': product.get('brand'),
-            'title': product.get('title'),  # Required field
+            'title': product.get('title'),
             'description': product.get('description'),
             'category': product.get('category'),
             'gender': product.get('gender'),
-            'price': product.get('price'),
-            'currency': product.get('currency', 'EUR'),
-            'metadata': metadata_text,  # As text, not JSONB
+            'metadata': metadata_text,
             'size': product.get('size'),
             'second_hand': product.get('second_hand', False),
-            'embedding': embedding
+            'country': product.get('country'),
+            'price': product.get('price'),  # Text: "20USD,400CZK,80PLN"
+            'additional_images': product.get('additional_images'),  # JSON array string
+            'image_embedding': image_embedding,
+            'info_embedding': info_embedding,
         }
 
         # Remove None values and empty strings to avoid DB issues

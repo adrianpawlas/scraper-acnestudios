@@ -4,6 +4,7 @@ Script to extract all image URLs from a single Acne Studios product page.
 This helps identify which image should be used as the main product image.
 """
 
+import re
 import requests
 import logging
 import sys
@@ -156,7 +157,7 @@ class ProductImageExtractor:
 
         preferred_found = False
         for i, img in enumerate(product_data['images'], 1):
-            is_preferred = 'Y_A.jpg' in img['url']
+            is_preferred = bool(re.search(r'_[YB]\.jpg', img['url']))
             if is_preferred:
                 preferred_found = True
                 print(f"\n--- IMAGE {i} ⭐ PREFERRED ---")
@@ -173,10 +174,10 @@ class ProductImageExtractor:
 
         print(f"\n{'='*80}")
         if preferred_found:
-            print("⭐ Images marked with ⭐ are the preferred ones (containing 'Y_A.jpg').")
+            print("⭐ Images marked with ⭐ are the preferred ones (product-only: _Y.jpg or _B.jpg).")
             print("The scraper will use these images and skip products without them.")
         else:
-            print("❌ No preferred images found (containing 'Y_A.jpg'). This product would be skipped.")
+            print("❌ No preferred images found (_Y.jpg or _B.jpg). This product would be skipped.")
         print("\nCopy any image URL above and paste it into a browser to view the image.")
 
 def main():

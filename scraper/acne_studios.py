@@ -2,13 +2,14 @@
 Acne Studios scraper implementation for HTML-based product extraction.
 """
 
+import json
 import logging
 import re
 from typing import Dict, List, Optional, Any
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 from .base import BaseScraper, ProductData
-from .embeddings import get_image_embedding
+from .embeddings import get_image_embedding, get_text_embedding
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,29 @@ class AcneStudiosScraper(BaseScraper):
         self.base_url = site_config['base_url']
         self.max_pages = site_config.get('max_pages', 50)
 
+    def _map_to_product_category(self, name: str) -> Optional[str]:
+        """
+        Map category/breadcrumb name to product category.
+        Returns: sweaters, hoodies, footwear, accessories, bags, jackets, etc.
+        """
+        if not name:
+            return None
+        lower = name.lower()
+        # Order matters: check more specific first
+        if 'sweater' in lower or 'knit' in lower:
+            return 'sweaters'
+        if 'hoodie' in lower or 'hoody' in lower:
+            return 'hoodies'
+        if 'jacket' in lower or 'coat' in lower:
+            return 'jackets'
+        if 'shoe' in lower or 'boot' in lower or 'sneaker' in lower or 'footwear' in lower:
+            return 'footwear'
+        if 'bag' in lower:
+            return 'bags'
+        if 'scarf' in lower or 'accessor' in lower or 'hat' in lower or 'belt' in lower:
+            return 'accessories'
+        return None
+
     def _determine_category_and_gender(self, category_name: str) -> tuple[Optional[str], Optional[str]]:
         """
         Determine gender and category based on category name.
@@ -27,28 +51,19 @@ class AcneStudiosScraper(BaseScraper):
         Returns:
             tuple: (gender, category)
             - gender: "men", "women", or None
-            - category: "accessory", "footwear", None (for clothing), or "other"
+            - category: sweaters, hoodies, footwear, accessories, bags, jackets, etc.
         """
         category_lower = category_name.lower()
 
         # Gender detection
-        if 'men' in category_lower and 'women' not in category_lower:
+        if 'men' in category_lower and 'woman' not in category_lower:
             gender = 'men'
-        elif 'women' in category_lower:
+        elif 'woman' in category_lower:
             gender = 'women'
         else:
-            gender = None  # unisex becomes null
+            gender = None
 
-        # Category detection
-        if 'bag' in category_lower or 'scarf' in category_lower or 'scarves' in category_lower:
-            category = 'accessory'
-        elif 'shoe' in category_lower:
-            category = 'footwear'
-        elif 'clothing' in category_lower:
-            category = None  # clothing is default, no category needed
-        else:
-            category = 'other'
-
+        category = self._map_to_product_category(category_name)
         return gender, category
 
     def scrape_category(self, category_config: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -169,7 +184,11 @@ class AcneStudiosScraper(BaseScraper):
                 )
 
                 # Scrape additional details from product page
-                detailed_data = self.scrape_product_details(product_url)
+                detailed_data = self.scrape_product_details(
+                    product_url,
+                    listing_price_text=price_text,
+                    listing_title=title
+                )
                 if detailed_data is None:
                     # Skip product if no preferred image found
                     logger.info(f"Skipping product {product_url} - no preferred image found")
@@ -184,7 +203,12 @@ class AcneStudiosScraper(BaseScraper):
 
         return products
 
-    def scrape_product_details(self, product_url: str) -> Optional[Dict[str, Any]]:
+    def scrape_product_details(
+        self,
+        product_url: str,
+        listing_price_text: Optional[str] = None,
+        listing_title: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         """Scrape detailed information from individual product page."""
         soup = self.get_soup(product_url)
         if not soup:
@@ -194,6 +218,7 @@ class AcneStudiosScraper(BaseScraper):
 
         try:
             # Extract detailed information
+            title = self.extract_text(soup, selectors.get('title', 'h1, .product-title, [data-testid*="product-title"]')) or listing_title or ''
             description = self.extract_text(soup, selectors.get('description', '.description'))
 
             # Extract sizes
@@ -210,6 +235,9 @@ class AcneStudiosScraper(BaseScraper):
             # Extract category from breadcrumbs
             category_text = self.extract_text(soup, selectors.get('category', '.breadcrumb'))
             category = self._parse_category(category_text) if category_text else None
+
+            # Extract prices in multi-currency format
+            price_text = self._extract_prices_with_currencies(soup, listing_price_text)
 
             # Extract color
             color = self.extract_text(soup, selectors.get('color', '.color'))
@@ -251,26 +279,46 @@ class AcneStudiosScraper(BaseScraper):
             alt_urls = []
 
             if image_urls:
-                # First try to find the image with '*Y_A.jpg' pattern
+                # Find product-only image: B or Y suffix before .jpg (e.g. B60353-BZH_Y.jpg, B70158-BUT_B.jpg)
                 preferred_image_url = None
                 for img_url in image_urls:
-                    if 'Y_A.jpg' in img_url:
+                    if re.search(r'_[YB]\.jpg', img_url):
                         preferred_image_url = img_url
                         break
 
                 if preferred_image_url:
-                    # Found the preferred Y_A image, use it as main
+                    # Found product-only image (B or Y), use it as main
                     main_image_url = preferred_image_url
-                    # Put all other images in alt_urls
+                    # Put all other images in additional_images
                     alt_urls = [url for url in image_urls if url != preferred_image_url]
-                    logger.info(f"Found preferred Y_A image as main: {main_image_url}")
+                    logger.info(f"Found product-only image (B/Y) as main: {main_image_url}")
                 else:
-                    # No preferred image found, skip this product entirely
-                    logger.warning(f"No preferred Y_A image found for product, skipping. Available images: {len(image_urls)}")
+                    # No product-only image found, skip this product entirely
+                    logger.warning(f"No product-only image (_Y.jpg or _B.jpg) found for product, skipping. Available images: {len(image_urls)}")
                     return None
 
-                logger.info(f"Generating embedding for: {main_image_url}")
-                embedding = get_image_embedding(main_image_url)
+                logger.info(f"Generating image embedding for: {main_image_url}")
+                image_embedding = get_image_embedding(main_image_url)
+
+            # Build info text for info_embedding (title, description, price, metadata, etc.)
+            info_parts = [str(title) if title else '']
+            if description:
+                info_parts.append(description)
+            if price_text:
+                info_parts.append(f"Price: {price_text}")
+            if category:
+                info_parts.append(f"Category: {category}")
+            if color:
+                info_parts.append(f"Color: {color}")
+            if size_str:
+                info_parts.append(f"Sizes: {size_str}")
+            if sku:
+                info_parts.append(f"SKU: {sku}")
+            info_text = ' '.join(p for p in info_parts if p).strip()
+            info_embedding = get_text_embedding(info_text) if info_text else None
+
+            # additional_images as JSON array string
+            additional_images_str = json.dumps(alt_urls) if alt_urls else None
 
             return {
                 'description': description,
@@ -279,9 +327,11 @@ class AcneStudiosScraper(BaseScraper):
                 'sku': sku,
                 'category': category,
                 'tags': [color] if color else None,
-                'image_url': main_image_url,  # Update main image URL to use second image
-                'image_alt_urls': alt_urls if alt_urls else None,
-                'embedding': embedding
+                'image_url': main_image_url,
+                'additional_images': additional_images_str,
+                'image_embedding': image_embedding,
+                'info_embedding': info_embedding,
+                'price': price_text
             }
 
         except Exception as e:
@@ -387,15 +437,60 @@ class AcneStudiosScraper(BaseScraper):
         return path.strip('/').replace('/', '-')
 
     def _parse_category(self, breadcrumb_text: str) -> Optional[str]:
-        """Parse category from breadcrumb text."""
+        """Parse category from breadcrumb text and map to product category."""
         if not breadcrumb_text:
             return None
 
-        # Split by common separators and take the last meaningful part
         parts = re.split(r'[>/]', breadcrumb_text)
         for part in reversed(parts):
             part = part.strip()
             if part and len(part) > 2 and part.lower() not in ['home', 'acne studios']:
-                return part
-
+                mapped = self._map_to_product_category(part)
+                if mapped:
+                    return mapped
+                return part  # Use raw if no mapping
         return None
+
+    def _extract_prices_with_currencies(self, soup: BeautifulSoup, listing_price_text: Optional[str] = None) -> Optional[str]:
+        """
+        Extract prices with currencies in format "20USD,400CZK,80PLN".
+        Scrapes product page for all price elements; falls back to listing price.
+        """
+        price_parts = []
+        seen = set()
+
+        # Collect all price-like text from product page
+        for sel in ['.price', '.product-price', '[data-testid*="price"]', '.product-tile__price']:
+            for el in soup.select(sel):
+                t = el.get_text(strip=True)
+                if not t or len(t) > 50:
+                    continue
+                # Match patterns like "400 CZK", "€20", "$20", "20 USD", "80 PLN"
+                for m in re.finditer(r'(\d[\d\s.,]*)\s*([A-Z]{3}|€|£|\$|USD|EUR|CZK|PLN|SEK|NOK|DKK|GBP)', t, re.I):
+                    val = re.sub(r'[\s,]', '', m.group(1))
+                    cur = m.group(2).upper().replace('€', 'EUR').replace('£', 'GBP').replace('$', 'USD')
+                    if len(cur) == 1:
+                        cur = 'USD' if cur == '$' else 'EUR'
+                    key = f"{val}{cur}"
+                    if key not in seen:
+                        seen.add(key)
+                        price_parts.append(f"{val}{cur}")
+                # Also try "400 CZK" style
+                for m in re.finditer(r'([A-Z]{3}|€|£|\$)\s*(\d[\d\s.,]*)', t, re.I):
+                    cur = m.group(1).upper().replace('€', 'EUR').replace('£', 'GBP').replace('$', 'USD')
+                    val = re.sub(r'[\s,]', '', m.group(2))
+                    key = f"{val}{cur}"
+                    if key not in seen:
+                        seen.add(key)
+                        price_parts.append(f"{val}{cur}")
+
+        if listing_price_text:
+            m = re.search(r'(\d[\d\s.,]*)\s*([A-Z]{3}|€|£|\$|USD|EUR|CZK|PLN)', listing_price_text, re.I)
+            if m:
+                val = re.sub(r'[\s,]', '', m.group(1))
+                cur = (m.group(2) or 'EUR').upper().replace('€', 'EUR').replace('£', 'GBP').replace('$', 'USD')
+                key = f"{val}{cur}"
+                if key not in seen:
+                    price_parts.append(f"{val}{cur}")
+
+        return ','.join(price_parts) if price_parts else None

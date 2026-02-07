@@ -98,6 +98,59 @@ class SigLIPEmbeddings:
             logger.error(f"Failed to generate embedding for {image_url}: {e}")
             return None
 
+    def get_text_embedding(self, text: str) -> Optional[List[float]]:
+        """
+        Generate SigLIP text embedding using the same model as image embeddings.
+        Returns 768-dimensional embedding vector or None if failed.
+        Uses the text encoder so embeddings are in the same space as image_embeds.
+        """
+        if not text or not str(text).strip():
+            return None
+
+        if self.model is None:
+            self.load_model()
+
+        try:
+            # SigLIP processor tokenizes text; max_length=64 is required for SigLIP
+            inputs = self.processor(
+                text=[str(text)[:2000]],  # Truncate to avoid token limit
+                padding="max_length",
+                max_length=64,
+                truncation=True,
+                return_tensors="pt"
+            )
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+            with torch.no_grad():
+                text_out = self.model.get_text_features(
+                    input_ids=inputs["input_ids"],
+                    attention_mask=inputs.get("attention_mask")
+                )
+                # Handle both tensor and BaseModelOutputWithPooling
+                if hasattr(text_out, 'pooler_output') and text_out.pooler_output is not None:
+                    text_embeds = text_out.pooler_output
+                elif hasattr(text_out, 'last_hidden_state'):
+                    text_embeds = text_out.last_hidden_state[:, 0, :]
+                else:
+                    text_embeds = text_out
+
+            embedding = text_embeds.squeeze().cpu().numpy().flatten()
+
+            if len(embedding) != 768:
+                logger.error(f"Text embedding dimension mismatch: got {len(embedding)}, expected 768")
+                return None
+
+            embedding_list = embedding.tolist()
+            if any(not isinstance(x, (int, float)) or str(x).lower() in ('nan', 'inf', '-inf') for x in embedding_list):
+                logger.error("Text embedding contains invalid values")
+                return None
+
+            return embedding_list
+
+        except Exception as e:
+            logger.error(f"Failed to generate text embedding: {e}")
+            return None
+
     def get_batch_embeddings(self, image_urls: List[str]) -> List[Optional[List[float]]]:
         """
         Generate embeddings for multiple images in batch.
@@ -185,6 +238,15 @@ def get_image_embedding(image_url: str) -> Optional[List[float]]:
     if _embeddings_instance is None or _embeddings_instance.model_name != expected_model:
         _embeddings_instance = SigLIPEmbeddings(expected_model)
     return _embeddings_instance.get_image_embedding(image_url)
+
+def get_text_embedding(text: str) -> Optional[List[float]]:
+    """Get text embedding for product info using same model as image embeddings."""
+    global _embeddings_instance
+    expected_model = os.getenv("EMBEDDINGS_MODEL", "google/siglip-base-patch16-384")
+    if _embeddings_instance is None or _embeddings_instance.model_name != expected_model:
+        _embeddings_instance = SigLIPEmbeddings(expected_model)
+    return _embeddings_instance.get_text_embedding(text)
+
 
 def get_batch_embeddings(image_urls: List[str]) -> List[Optional[List[float]]]:
     """Get embeddings for multiple image URLs."""

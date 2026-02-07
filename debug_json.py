@@ -30,8 +30,8 @@ def debug_json_issue():
             print(f'\n--- Product {i+1} ---')
             print(f'Keys: {list(product.keys())}')
 
-            # Check embedding
-            embedding = product.get('embedding')
+            # Check embeddings
+            embedding = product.get('image_embedding') or product.get('embedding')
             if embedding:
                 print(f'Embedding type: {type(embedding)}')
                 print(f'Embedding length: {len(embedding) if isinstance(embedding, list) else "N/A"}')
