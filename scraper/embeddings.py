@@ -230,11 +230,17 @@ class SigLIPEmbeddings:
 # Global instance for reuse
 _embeddings_instance = None
 
+DEFAULT_EMBEDDINGS_MODEL = "google/siglip-base-patch16-384"
+
+def _get_embeddings_model_name() -> str:
+    """Get model name from env; treat empty/whitespace as unset."""
+    name = os.getenv("EMBEDDINGS_MODEL", "").strip()
+    return name if name else DEFAULT_EMBEDDINGS_MODEL
+
 def get_image_embedding(image_url: str) -> Optional[List[float]]:
     """Get embedding for a single image URL."""
     global _embeddings_instance
-    # Always check if model name has changed (in case env var was updated)
-    expected_model = os.getenv("EMBEDDINGS_MODEL", "google/siglip-base-patch16-384")
+    expected_model = _get_embeddings_model_name()
     if _embeddings_instance is None or _embeddings_instance.model_name != expected_model:
         _embeddings_instance = SigLIPEmbeddings(expected_model)
     return _embeddings_instance.get_image_embedding(image_url)
@@ -242,7 +248,7 @@ def get_image_embedding(image_url: str) -> Optional[List[float]]:
 def get_text_embedding(text: str) -> Optional[List[float]]:
     """Get text embedding for product info using same model as image embeddings."""
     global _embeddings_instance
-    expected_model = os.getenv("EMBEDDINGS_MODEL", "google/siglip-base-patch16-384")
+    expected_model = _get_embeddings_model_name()
     if _embeddings_instance is None or _embeddings_instance.model_name != expected_model:
         _embeddings_instance = SigLIPEmbeddings(expected_model)
     return _embeddings_instance.get_text_embedding(text)
@@ -251,8 +257,7 @@ def get_text_embedding(text: str) -> Optional[List[float]]:
 def get_batch_embeddings(image_urls: List[str]) -> List[Optional[List[float]]]:
     """Get embeddings for multiple image URLs."""
     global _embeddings_instance
-    # Always check if model name has changed (in case env var was updated)
-    expected_model = os.getenv("EMBEDDINGS_MODEL", "google/siglip-base-patch16-384")
+    expected_model = _get_embeddings_model_name()
     if _embeddings_instance is None or _embeddings_instance.model_name != expected_model:
         _embeddings_instance = SigLIPEmbeddings(expected_model)
     return _embeddings_instance.get_batch_embeddings(image_urls)
