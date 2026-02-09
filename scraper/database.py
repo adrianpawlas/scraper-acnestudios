@@ -1,32 +1,47 @@
 """
 Database operations for Supabase integration.
+Uses batched HTTP requests to PostgREST to avoid timeouts.
 """
 
+import json
 import logging
 import os
 from typing import List, Dict, Any, Optional
+import requests
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 
+BATCH_SIZE = 50  # Chunk size to avoid statement timeouts
+
+
 class SupabaseDB:
     """Supabase database operations for product storage."""
 
     def __init__(self):
-        self.supabase_url = os.getenv('SUPABASE_URL')
+        url = os.getenv('SUPABASE_URL', '').rstrip('/')
         self.supabase_key = os.getenv('SUPABASE_KEY')
 
-        if not self.supabase_url or not self.supabase_key:
+        if not url or not self.supabase_key:
             raise ValueError("SUPABASE_URL and SUPABASE_KEY environment variables are required")
 
-        self.client: Client = create_client(self.supabase_url, self.supabase_key)
+        self.supabase_url = url
+        self.base_url = f"{url}/rest/v1"
+        self.client: Client = create_client(url, self.supabase_key)
+
+        self._session = requests.Session()
+        self._session.headers.update({
+            "apikey": self.supabase_key,
+            "Authorization": f"Bearer {self.supabase_key}",
+            "Content-Type": "application/json",
+        })
         logger.info("Connected to Supabase")
 
     def upsert_products(self, products: List[Dict[str, Any]]) -> bool:
         """
-        Upsert products into the database.
+        Upsert products into the database using batched HTTP requests.
         Uses (source, product_url) as unique key.
         """
         if not products:
@@ -34,17 +49,30 @@ class SupabaseDB:
             return True
 
         try:
-            # Convert products to the expected format
-            formatted_products = []
-            for product in products:
-                formatted_product = self._format_product_for_db(product)
-                formatted_products.append(formatted_product)
+            formatted = [self._format_product_for_db(p) for p in products]
+            # Normalize: same keys in every row (PostgREST requirement)
+            all_keys = set()
+            for p in formatted:
+                all_keys.update(p.keys())
+            normalized = [{k: p.get(k) for k in all_keys} for p in formatted]
 
-            # Perform upsert using the user's table constraint
-            response = self.client.table('products').upsert(
-                formatted_products,
-                on_conflict='source,product_url'
-            ).execute()
+            endpoint = f"{self.base_url}/products"
+            prefer = "resolution=merge-duplicates,return=minimal"
+            params = {"on_conflict": "source,product_url"}
+
+            for i in range(0, len(normalized), BATCH_SIZE):
+                chunk = normalized[i : i + BATCH_SIZE]
+                r = self._session.post(
+                    endpoint,
+                    params=params,
+                    headers={"Prefer": prefer},
+                    data=json.dumps(chunk),
+                    timeout=120,
+                )
+                if r.status_code not in (200, 201, 204):
+                    logger.error(f"Upsert failed: {r.status_code} {r.text}")
+                    return False
+                logger.debug(f"Upserted batch {i // BATCH_SIZE + 1} ({len(chunk)} products)")
 
             logger.info(f"Successfully upserted {len(products)} products")
             return True
